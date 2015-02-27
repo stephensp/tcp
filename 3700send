@@ -15,6 +15,9 @@ MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
+packet_buffer = {} 
+window_size = 5000 
+used_window = 0
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -27,49 +30,59 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(TIMEOUT)
 
 def log(string):
-  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
+    sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
 
 def send_next_packet():
-  global SEQUENCE
+    global SEQUENCE
+    global used_window
+    global packet_buffer
+    global ack
 
-  data = sys.stdin.read(DATA_SIZE)
-  if (len(data) > 0):
-    msg = json.dumps({"sequence": SEQUENCE, "data": data, "ack": False, "eof": False})
-    SEQUENCE += len(data)
+    data = sys.stdin.read(DATA_SIZE)
+    if (len(data) > 0):
+        decode_msg = {"sequence": SEQUENCE, "data": data, "ack": False, "eof": False}
+        msg = json.dumps(decode_msg)
+        SEQUENCE += len(data)
+        packet_buffer[SEQUENCE] = decode_msg
+        used_window += len(data)
 
-    if sock.sendto(msg, dest) < len(msg):
-      log("[error] unable to fully send packet")
+        if sock.sendto(msg, dest) < len(msg):
+            log("[error] unable to fully send packet")
+        else:
+            log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
+        return True
     else:
-      log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
-    return True
-  else:
-    return False
+        return False
 
 # Send first packet
 send_next_packet()
 
 # Now read in data, send packets
 while True:
-  log("ABOUT TO SLEEP")
-  result = sock.recvfrom(MSG_SIZE)
+    log("ABOUT TO SLEEP")
+    result = sock.recvfrom(MSG_SIZE)
 
-  if result:
-    (data, addr) = result
-    try:
-      decoded = json.loads(data)
+    if result:
+        (data, addr) = result
+        try:
+            decoded = json.loads(data)
 
-      # If there is an ack, send next packet
-      if decoded['ack'] == SEQUENCE:
-        log("[recv ack] " + str(SEQUENCE))
+        # If there is an ack, send next packet
+            if decoded['ack'] in packet_buffer.keys():
+#            if decoded['ack'] == SEQUENCE:
+                log("[recv ack] " + str(decoded['ack']))
+                length = len(packet_buffer[SEQUENCE]["data"])
+                used_window -= length 
+                del packet_buffer[SEQUENCE]
 
-        # Try to send next packet; break if no more data
-        if (not send_next_packet()):
-          break
-    except (ValueError, KeyError, TypeError):
-      log("[recv corrupt packet]")
-  else:
-    log("[error] timeout")
-    sys.exit(-1)
+              # Try to send next packet; break if no more data
+                if (not send_next_packet()):
+                    break
+        except (ValueError, KeyError, TypeError):
+            log("[recv corrupt packet]")
+    else:
+        log("[error] timeout")
+        sys.exit(-1)
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
