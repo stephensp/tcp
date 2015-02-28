@@ -18,6 +18,7 @@ SEQUENCE = 0
 packet_buffer = {} 
 window_size = 5000 
 used_window = 0
+sockets = []
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -28,6 +29,7 @@ dest = (UDP_IP, UDP_PORT)
 # Set up the socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
 sock.settimeout(TIMEOUT)
+sockets.append(sock)
 
 def log(string):
     sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " " + string + "\n")
@@ -45,13 +47,14 @@ def send_next_packet():
         SEQUENCE += len(data)
         packet_buffer[SEQUENCE] = decode_msg
         used_window += len(data)
-
+        log("used window is now " + str(used_window))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
         else:
             log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
         return True
     else:
+        log("No data to currently send")
         return False
 
 # Send first packet
@@ -60,29 +63,39 @@ send_next_packet()
 # Now read in data, send packets
 while True:
     log("ABOUT TO SLEEP")
-    result = sock.recvfrom(MSG_SIZE)
 
-    if result:
-        (data, addr) = result
-        try:
-            decoded = json.loads(data)
+    while (used_window <= window_size - MSG_SIZE):
+        if (not send_next_packet()):
+            break
 
-        # If there is an ack, send next packet
-            if decoded['ack'] in packet_buffer.keys():
-#            if decoded['ack'] == SEQUENCE:
-                log("[recv ack] " + str(decoded['ack']))
-                length = len(packet_buffer[SEQUENCE]["data"])
-                used_window -= length 
-                del packet_buffer[SEQUENCE]
-
-              # Try to send next packet; break if no more data
-                if (not send_next_packet()):
-                    break
-        except (ValueError, KeyError, TypeError):
-            log("[recv corrupt packet]")
-    else:
-        log("[error] timeout")
-        sys.exit(-1)
+    ready, ignore, ignore2 = select.select(sockets, [], [], .000001)
+    log("ready length is " + str(len(ready)))
+    while len(ready) != 0: 
+        result = sock.recvfrom(MSG_SIZE)
+        log("result is " + str(result))
+        if result:
+            (data, addr) = result
+            try:
+                log("trying to decode...")
+                decoded = json.loads(data)
+    
+            # If there is an ack, send next packet
+                ack = decoded['ack']
+                if ack in packet_buffer.keys():
+                    log("[recv ack] " + str(ack))
+                    length = len(packet_buffer[ack]["data"])
+                    log("length is " + str(length))
+                    used_window -= length 
+                    log("decreasing used_window to " + str(used_window))
+                    del packet_buffer[ack]
+    
+            except (ValueError, KeyError, TypeError):
+                log("[recv corrupt packet]" )
+        else:
+            log("[error] timeout")
+            sys.exit(-1)
+        ready, ignore, ignore2 = select.select(sockets, [], [], 1)
+        log("ready length is " + str(len(ready)))
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
