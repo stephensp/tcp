@@ -16,7 +16,7 @@ DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
 packet_buffer = {} 
-window_size = 5000 
+window_size = 500000 
 used_window = 0
 sockets = []
 
@@ -59,16 +59,19 @@ def send_next_packet():
 
 # Send first packet
 send_next_packet()
-
+done = 0
 # Now read in data, send packets
 while True:
     log("ABOUT TO SLEEP")
 
     while (used_window <= window_size - MSG_SIZE):
         if (not send_next_packet()):
+            done = 1
             break
+    if done == 1:
+        break
 
-    ready, ignore, ignore2 = select.select(sockets, [], [], .000001)
+    ready, ignore, ignore2 = select.select(sockets, [], [], .01)
     log("ready length is " + str(len(ready)))
     while len(ready) != 0: 
         result = sock.recvfrom(MSG_SIZE)
@@ -88,7 +91,6 @@ while True:
                     used_window -= length 
                     log("decreasing used_window to " + str(used_window))
                     del packet_buffer[ack]
-    
             except (ValueError, KeyError, TypeError):
                 log("[recv corrupt packet]" )
         else:
