@@ -16,7 +16,7 @@ DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
 packet_buffer = {} 
-window_size = 500000 
+window_size = 500000
 used_window = 0
 sockets = []
 
@@ -57,6 +57,20 @@ def send_next_packet():
         log("No data to currently send")
         return False
 
+def ack_packets(ack_num):
+    global packet_buffer
+    global used_window
+
+    for seq in packet_buffer.keys():
+        if seq <= ack_num:
+            length = len(packet_buffer[ack_num]["data"])
+            log("length is " + str(length))
+            used_window -= length 
+            log("decreasing used_window to " + str(used_window))
+            del packet_buffer[ack_num]
+            
+
+
 # Send first packet
 send_next_packet()
 done = 0
@@ -86,11 +100,7 @@ while True:
                 ack = decoded['ack']
                 if ack in packet_buffer.keys():
                     log("[recv ack] " + str(ack))
-                    length = len(packet_buffer[ack]["data"])
-                    log("length is " + str(length))
-                    used_window -= length 
-                    log("decreasing used_window to " + str(used_window))
-                    del packet_buffer[ack]
+                    ack_packets(ack)
             except (ValueError, KeyError, TypeError):
                 log("[recv corrupt packet]" )
         else:
