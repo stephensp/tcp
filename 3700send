@@ -10,15 +10,22 @@ import time
 import datetime
 import select
 import json
+import datetime
 
 MSG_SIZE = 1500
 DATA_SIZE = 1000
 TIMEOUT = 30
 SEQUENCE = 0
-packet_buffer = {} 
+
+#Things to try and change!
 window_size = 500000
-used_window = 0
+time_out = .5 
+
+
+packet_buffer = {} 
 sockets = []
+packet_timestamp = {}
+used_window = 0
 
 # Bind to localhost and an ephemeral port
 IP_PORT = sys.argv[1]
@@ -47,6 +54,7 @@ def send_next_packet():
         SEQUENCE += len(data)
         packet_buffer[SEQUENCE] = decode_msg
         used_window += len(data)
+        packet_timestamp[SEQUENCE] = datetime.datetime.now() 
         log("used window is now " + str(used_window))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
@@ -57,18 +65,26 @@ def send_next_packet():
         log("No data to currently send")
         return False
 
+def resend_packet(seq_num):
+    msg = json.dumps(packet_buffer[seq_num])
+    packet_timestamp[seq_num] = datetime.datetime.now()
+    if sock.sendto(msg, dest) < len(msg):
+        log("[error] unable to fully send packet")
+    else:
+        #log("[send data] " + str(seq_num) + " (" + str(len(data)) + ")")
+        log("[send data] " + str(seq_num))
+
 def ack_packets(ack_num):
     global packet_buffer
     global used_window
 
     for seq in packet_buffer.keys():
         if seq <= ack_num:
+            log("Acking seq number " + str(seq))
             length = len(packet_buffer[ack_num]["data"])
-            log("length is " + str(length))
             used_window -= length 
-            log("decreasing used_window to " + str(used_window))
             del packet_buffer[ack_num]
-            
+            del packet_timestamp[seq] 
 
 
 # Send first packet
@@ -82,18 +98,20 @@ while True:
         if (not send_next_packet()):
             done = 1
             break
-    if done == 1:
+
+    # Break if no more data and there are no unacked packets
+    if (done == 1) and (len(packet_buffer) == 0):
         break
 
     ready, ignore, ignore2 = select.select(sockets, [], [], .01)
-    log("ready length is " + str(len(ready)))
+    #log("ready length is " + str(len(ready)))
     while len(ready) != 0: 
         result = sock.recvfrom(MSG_SIZE)
-        log("result is " + str(result))
+        #log("result is " + str(result))
         if result:
             (data, addr) = result
             try:
-                log("trying to decode...")
+                #log("trying to decode...")
                 decoded = json.loads(data)
     
             # If there is an ack, send next packet
@@ -107,7 +125,15 @@ while True:
             log("[error] timeout")
             sys.exit(-1)
         ready, ignore, ignore2 = select.select(sockets, [], [], 1)
-        log("ready length is " + str(len(ready)))
+        #log("ready length is " + str(len(ready)))
+
+    #check if oldest packet is timed out
+    for seq_num in packet_timestamp: 
+        time_diff = datetime.datetime.now() - packet_timestamp[seq_num] 
+        #log("time diff is " + str(time_diff.total_seconds()))
+        if time_diff.total_seconds() > time_out:
+            log("Resending due to timeout, seq_num: " + str(seq_num))
+            resend_packet(seq_num)
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
