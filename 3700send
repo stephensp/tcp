@@ -19,7 +19,9 @@ SEQUENCE = 0
 
 #Things to try and change!
 window_size = 500000
-time_out = .5 
+time_out = 1
+time_alpha = .8
+first_packet = 0
 
 
 packet_buffer = {} 
@@ -85,8 +87,19 @@ def resend_packet(seq_num):
 def ack_packets(ack_num):
     global packet_buffer
     global used_window
+    global time_out
+    global first_packet
 
-    log("In ack -packet for " + str(ack_num))
+    time_delay = (datetime.datetime.now() - packet_timestamp[ack_num]).total_seconds()
+    if(first_packet == 0):
+        time_out = time_delay
+        first_packet = 1
+
+    log("old time_out " + str(time_out))
+    time_out = (time_alpha)*time_out + (1-time_alpha)*time_delay
+    log("new time_out " + str(time_out))
+    log("last time delay " + str(time_delay))
+
     for seq in packet_buffer.keys():
         if seq <= ack_num:
             log("Acking seq number " + str(seq))
@@ -143,6 +156,7 @@ while True:
         if time_diff.total_seconds() > time_out:
             log("Resending due to timeout, seq_num: " + str(seq_num))
             resend_packet(seq_num)
+
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
