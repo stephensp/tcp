@@ -55,7 +55,6 @@ def send_next_packet():
         packet_buffer[SEQUENCE] = decode_msg
         used_window += len(data)
         packet_timestamp[SEQUENCE] = datetime.datetime.now() 
-        log("used window is now " + str(used_window))
         if sock.sendto(msg, dest) < len(msg):
             log("[error] unable to fully send packet")
         else:
@@ -66,7 +65,16 @@ def send_next_packet():
         return False
 
 def resend_packet(seq_num):
-    msg = json.dumps(packet_buffer[seq_num])
+    try:
+        decoded_msg = packet_buffer[seq_num]
+    except (ValueError, KeyError, TypeError):
+        log("Summin broke getting message from buffer")
+
+    try:
+        msg = json.dumps(decoded_msg)
+    except (ValueError, KeyError, TypeError):
+        log("Summin broke making json")
+
     packet_timestamp[seq_num] = datetime.datetime.now()
     if sock.sendto(msg, dest) < len(msg):
         log("[error] unable to fully send packet")
@@ -78,12 +86,13 @@ def ack_packets(ack_num):
     global packet_buffer
     global used_window
 
+    log("In ack -packet for " + str(ack_num))
     for seq in packet_buffer.keys():
         if seq <= ack_num:
             log("Acking seq number " + str(seq))
             length = len(packet_buffer[ack_num]["data"])
             used_window -= length 
-            del packet_buffer[ack_num]
+            del packet_buffer[seq]
             del packet_timestamp[seq] 
 
 
