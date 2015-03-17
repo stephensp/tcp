@@ -23,9 +23,11 @@ time_alpha = .8
 first_packet = 0
 
 #dynamic window 
-window_size = 500000
+window_size = MSG_SIZE  
 lost_packet = 0
 duplicate_ack = -1
+num_dup_acks = 0
+threshold = MSG_SIZE * 1000000 #start with something ridiculously large
 
 packet_buffer = {} 
 sockets = []
@@ -100,6 +102,29 @@ def ack_packets(ack_num):
             del packet_buffer[seq]
             del packet_timestamp[seq] 
 
+def adjust_window():
+    global lost_packet, window_size, num_dup_acks, threshold, MSG_SIZE
+    if lost_packet == 1:
+        #go back to slow start if packet lost
+        window_size = MSG_SIZE
+        lost_packet = 0
+        return 
+
+    if num_dup_acks == 3:
+        #Resend packet if triple duplicate ack
+#        resend_packet(duplicate_ack)
+        #half the conjestion window
+        window_size = window_size / 2
+        return 
+
+    if window_size < threshold:
+        window_size = window_size * 2
+        return 
+
+    if window_size >= threshold:
+        window_size = window_size + MSG_SIZE
+        return
+
 
 def adjust_timeout(ack_num):
     global time_out
@@ -111,10 +136,7 @@ def adjust_timeout(ack_num):
         first_packet = 1
 
 
-    log("old time_out " + str(time_out))
     time_out = (time_alpha)*time_out + (1-time_alpha)*time_delay
-    log("new time_out " + str(time_out))
-    log("last time delay " + str(time_delay))
 
 # Send first packet
 send_next_packet()
@@ -145,6 +167,12 @@ while True:
     
             # If there is an ack, send next packet
                 ack = decoded['ack']
+                if duplicate_ack == ack:
+                    num_dup_acks = num_dup_acks + 1
+                
+                else:
+                    duplicate_ack = ack
+
                 if ack in packet_buffer.keys():
                     log("[recv ack] " + str(ack))
                     ack_packets(ack)
@@ -162,9 +190,10 @@ while True:
         time_diff = datetime.datetime.now() - packet_timestamp[seq_num] 
         #log("time diff is " + str(time_diff.total_seconds()))
         if time_diff.total_seconds() > time_out:
-            log("Resending due to timeout, seq_num: " + str(seq_num))
             resend_packet(seq_num)
+            lost_packet = 1
 
+    adjust_window()
 
 sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}), dest)
 sys.exit(0)
