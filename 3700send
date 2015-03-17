@@ -18,11 +18,14 @@ TIMEOUT = 30
 SEQUENCE = 0
 
 #Things to try and change!
-window_size = 500000
 time_out = 1
 time_alpha = .8
 first_packet = 0
 
+#dynamic window 
+window_size = 500000
+lost_packet = 0
+duplicate_ack = -1
 
 packet_buffer = {} 
 sockets = []
@@ -87,27 +90,31 @@ def resend_packet(seq_num):
 def ack_packets(ack_num):
     global packet_buffer
     global used_window
-    global time_out
     global first_packet
 
+    for seq in packet_buffer.keys():
+        if seq <= ack_num:
+            log("Acking seq number " + str(seq))
+            length = len(packet_buffer[seq]["data"])
+            used_window -= length 
+            del packet_buffer[seq]
+            del packet_timestamp[seq] 
+
+
+def adjust_timeout(ack_num):
+    global time_out
+
     time_delay = (datetime.datetime.now() - packet_timestamp[ack_num]).total_seconds()
+
     if(first_packet == 0):
         time_out = time_delay
         first_packet = 1
+
 
     log("old time_out " + str(time_out))
     time_out = (time_alpha)*time_out + (1-time_alpha)*time_delay
     log("new time_out " + str(time_out))
     log("last time delay " + str(time_delay))
-
-    for seq in packet_buffer.keys():
-        if seq <= ack_num:
-            log("Acking seq number " + str(seq))
-            length = len(packet_buffer[ack_num]["data"])
-            used_window -= length 
-            del packet_buffer[seq]
-            del packet_timestamp[seq] 
-
 
 # Send first packet
 send_next_packet()
@@ -141,6 +148,7 @@ while True:
                 if ack in packet_buffer.keys():
                     log("[recv ack] " + str(ack))
                     ack_packets(ack)
+                    adjust_timeout(ack)
             except (ValueError, KeyError, TypeError):
                 log("[recv corrupt packet]" )
         else:
